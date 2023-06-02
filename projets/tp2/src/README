@@ -1,0 +1,13 @@
+lancer la compilation du fichier tp2.cpp avec :
+make -j4 config=release
+
+lancer l'exécutable avec :
+./bin/tp2
+
+Chaque fichier cpp contient un main, mais le seul executé est celui du tp2.cpp.
+Les images résultats de :
+    - tp2_partie2.cpp => triangles_zbuff.png
+    - tp2_partie2_robot_zbuffer.cpp => robot.png
+    - tp2.cpp  => lumiere1.png
+               => lumiere2.png
+               => lumiere3.png
