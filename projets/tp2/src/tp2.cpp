@@ -5,6 +5,11 @@
 #include "vec.h"
 #include "materials.h"
 #include "mesh_io.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <cstring>
+#include <fstream>
+
 
 struct Hit
 {
@@ -113,42 +118,26 @@ bool obstrue_lumiere(const Point oSoleil, Vector dirPtSoleil, const std::vector<
 // PARTIE 4
 Hit intersect( const Point& o, const Vector& d, const std::vector<Point>& positions ) {
     Hit result;
-    std::vector<Hit> hitIntersect;
+    result.triangle_id = -1;
     Point pt;
     float tcoef;
+    float tcoefmin = 1000000.0;
     // Pour savoir quel est le bon Hit on stoke le plus petit tcoef et si on en trouve un minimum on actualise le hit result
     for(int i=0; i < positions.size(); i+= 3) {
-        if(intersection_tetraedre(o, d, positions[i], positions[i+1], positions[i+2], pt, tcoef)) {
-            Hit hitp;
-            hitp.p = pt;
-            hitp.t = tcoef;
+        if(intersection_tetraedre(o, d, positions[i], positions[i+1], positions[i+2], pt, tcoef) && tcoef < tcoefmin && tcoef >= 0) {
+            tcoefmin = tcoef;
+            result.p = pt;
+            result.t = tcoef;
             //premier point du triangle
-            hitp.triangle_id = i/3;
-            hitp.n = cross(Vector(positions[i], positions[i+1]), Vector(positions[i], positions[i+2]));
-            hitIntersect.push_back(hitp);
+            result.triangle_id = i/3;
+            result.n = cross(Vector(positions[i], positions[i+1]), Vector(positions[i], positions[i+2]));
+            Vector lambda = interpole(result.p, o, positions[i], positions[i+1], positions[i+2]);
+            result.lambdax = lambda.x;
+            result.lambday = lambda.y;
+            result.lambdaz = lambda.z;
         }
     }
 
-    if(hitIntersect.size() > 0) {
-        result = hitIntersect[0];
-        for (int j = 0; j < hitIntersect.size(); j++) {
-            //std::cout << "intersection " << j << std::endl;
-            // Si le z du nouveau pt d'intersection plus petit que le precedent mais > 0 (devant caméra)
-            //if( (hitIntersect[j].p.z >= result.p.z) && (hitIntersect[j].p.z < 0)) {
-            if( (hitIntersect[j].t <= result.t) && (hitIntersect[j].t >= 0)) {
-                result = hitIntersect[j];
-                result.triangle_id = hitIntersect[j].triangle_id;
-                int idT = hitIntersect[j].triangle_id;
-                Vector lambda = interpole(hitIntersect[j].p, o, positions[idT], positions[idT+1], positions[idT+2]);
-                //std::cout << lambda << std::endl;
-                result.lambdax = lambda.x;
-                result.lambday = lambda.y;
-                result.lambdaz = lambda.z;
-            }
-        }
-        return result;
-    }
-    result.triangle_id = -1;
     return result;
 }
 
@@ -161,7 +150,7 @@ void color_zbuff(const int &px, const int &py, float &zp, Image &zbuff, Image &i
 }
 
 
-int main( )
+int main(int argc, char **argv)
 {
     // cree l'image resultat
     Image image(1024, 1024);
@@ -183,341 +172,304 @@ int main( )
     Point i(20, -20, -10);
 
 
-    // PARTIE 2 : Question 5 : lire un obj
-    /*const char *filename= "data/robot.obj";
-   
-    std::vector<Point> positions;
-    std::vector<Color> materials;
-    if(!read_positions(filename, positions))
-        //return "erreur";       
-        return 1;
-    printf("%d triangles\n", int(positions.size() / 3));
-   
-    // deplace tous les sommets devant la camera
-    for(unsigned i= 0; i < positions.size(); i++)
-        positions[i]= positions[i] + Vector(0, -2, -4);     // a ajuster en fonction de l'objet...
-   
-    // englobant des points, verifier qu'ils sont bien devant la camera...
-    Point pmin= positions[0];
-    Point pmax= positions[0];
-    for(unsigned i= 1; i < positions.size(); i++)
-    {
-        pmin= min(pmin, positions[i]);
-        pmax= max(pmax, positions[i]);
-    }
-    printf("bounds [%f %f %f]x[%f %f %f]\n", pmin.x, pmin.y, pmin.z, pmax.x, pmax.y, pmax.z);
+    // On utilise l'exécutable avec des arguments
+    if(argc >=2) {
+    // TRIANGLES AVEC ZBUFFER
+        if(!strcmp(argv[1], "triangles")) {
+            std::cout << "AFFICHAGE TRIANGLES" << std::endl;
+            Image zbuff(image.width(), image.height(), Color(-1000));  
 
-    Image zbuff(image.width(), image.height(), Color(-1000));  
+            for(int py= 0; py < image.height(); py++)
+            for(int px= 0; px < image.width(); px++)
+            {
+                // rayon centre camera
+                float x = float(px)/image.width() * 2 - 1;
+                float y = float(py)/image.height() * 2 - 1;
+                float z = -1;       
+                Point p = Point(x, y, z);
 
-    // POUR PARCOURIR TOUS LES PIXELS DE L'IMAGE
-    //for(int py= 0; py < image.height(); py++)
-    //for(int px= 0; px < image.width(); px++)
-    // POUR NE PARCOURIR TOUS LES PIXELS MAIS SEULEMENT CEUX CONCERNÉS PAR LA BOITE ENGLOBANTE
-    for(int py= 0; py < image.height(); py++)
-    for(int px= 0; px < image.width(); px++)
-    {
+                Point o = Point(0, 0, 0);
+                Vector dist = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
 
-        // Le pixel est noir par defaut
-        image(px, py)= Black();//Color(0.5, 0.5, 0.5);
 
-        // rayon centre camera
-        float x = float(px)/image.width() * 2 - 1;
-        float y = float(py)/image.height() * 2 - 1;
-        float z = -1;       
-        Point p = Point(x, y, z);
-
-        Point o = Point(0, 0, 0);
-        Vector dist = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
-
-        // parcours tous les triangles
-        for(unsigned i= 0; i +2 < positions.size(); i+= 3)
-        {
-            Point t[3]= {
-                positions[ i    ],
-                positions[ i +1 ],
-                positions[ i +2 ]
-            };
-
-            //std::cout << t[0].x << t[0].y << t[0].z << std::endl;
-
-            Vector normal = normalize( cross( Vector(t[0], t[1]), Vector(t[0], t[2]) ) );
-            if(normal.z >= 0){
-                
                 // triangle
-                if(appartient_tetraedre(dist, o, t[0], t[1], t[2])) {
-                    Vector lambda = interpole(p, o, t[0], t[1], t[2]);  
-                    Point pe = point_dans_lespace(lambda, t[0], t[1], t[2]);
-                    float z = pe.z;
-                    Color col = Color(abs(normal.x), abs(normal.y), abs(normal.z), 1.0);
-                    color_zbuff(px, py, z, zbuff, image, col);
+                if(appartient_tetraedre(dist, o, a, b, c) || appartient_tetraedre(dist, o, d, e, f) || appartient_tetraedre(dist, o, g, h, i)) {
+                    if(appartient_tetraedre(dist, o, a, b, c)) { 
+                        Vector lambda = interpole(p, o, a, b, c);  
+                        Point pe = point_dans_lespace(lambda, a, b, c);
+                        float z = pe.z;
+                        color_zbuff(px, py, z, zbuff, image, Red());
+                    }
+                    if(appartient_tetraedre(dist, o, d, e, f)) { 
+                        Vector lambda = interpole(p, o, d, e, f);  
+                        Point pe = point_dans_lespace(lambda, d, e, f);
+                        float z = pe.z;
+                        color_zbuff(px, py, z, zbuff, image, Green());
+                    }
+                    if(appartient_tetraedre(dist, o, g, h, i)) { 
+                        Vector lambda = interpole(p, o, g, h, i);  
+                        Point pe = point_dans_lespace(lambda, g, h, i);
+                        float z = pe.z;
+                        color_zbuff(px, py, z, zbuff, image, Blue());
+                    }
                 }
-
+                //Vector n= normalize( cross( Vector(a, b), Vector(a, c) ) );
+                else{
+                    image(px, py)= Color(0.5, 0.5, 0.5);
+                }
+                
             }
-        }        
-    }*/
-    
-
-    // Part 2 : question 1
-    /*for(int py= 0; py < image.height(); py++)
-    for(int px= 0; px < image.width(); px++)
-    {
-        // rayon centre camera
-        float x = float(px)/image.width() * 2 - 1;
-        float y = float(py)/image.height() * 2 - 1;
-        float z = -1;       
-        Point p = Point(x, y, z);
-
-        Point o = Point(0, 0, 0);
-        Vector d = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
-
-
-        // triangle
-        if(appartient_tetraedre(d, o, a, b, c)) {   
-            image(px, py) = Red();
+            write_image(image, "projets/tp2/img/triangles_zbuff.png"); // par defaut en .png
         }
-        //Vector n= normalize( cross( Vector(a, b), Vector(a, c) ) );
-        else{
-            image(px, py)= White();
-        }
+
+    // ROBOT EN 3D
+        else if(!strcmp(argv[1], "robot")) {
+
+            const char *filename= "data/robot.obj";
+            std::vector<Point> positions;
+            if(!read_positions(filename, positions))
+                //return "erreur";       
+                return 1;
+            printf("%d triangles\n", int(positions.size() / 3));
+
+            // Récupérer les materials et leurs indices
+            Materials materials;
+            std::vector<int> material_indices;   // indices des matieres
+            if(!read_materials(filename, materials, material_indices))
+                //return "erreur";       
+                return 1;
+
+            std::cout << "taille positions : " << positions.size() << std::endl;
+            std::cout << "taille material_indices : " << material_indices.size() << std::endl;
+            for(int y = 0; y < materials.count() ; y++)
+                std::cout << "material de " << y << " :  " << materials(y).diffuse.r << " " << materials(y).diffuse.g << " " << materials(y).diffuse.b << " " << std::endl;
         
-    }*/
-
-    // Part 2 question 3
-    /*Color ca = Red();
-    Color cb = Blue();
-    Color cc = Green();
-
-
-    for(int py= 0; py < image.height(); py++)
-    for(int px= 0; px < image.width(); px++)
-    {
-        // rayon centre camera
-        float x = float(px)/image.width() * 2 - 1;
-        float y = float(py)/image.height() * 2 - 1;
-        float z = -1;       
-        Point p = Point(x, y, z);
-
-        Point o = Point(0, 0, 0);
-        Vector d = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
-
-
-        // triangle
-        if(appartient_tetraedre(d, o, a, b, c)) { 
-            Vector lambda = interpole(p, o, a, b, c);  
-            image(px, py) = lambda.x * ca + lambda.y * cb + lambda.z * cc;
-            Point pe = point_dans_lespace(lambda, a, b, c);
-            float z = pe.z;
-        }
-        //Vector n= normalize( cross( Vector(a, b), Vector(a, c) ) );
-        else{
-            image(px, py)= Color(0.5, 0.5, 0.5);
-        }
+            // deplace tous les sommets devant la camera
+            for(unsigned i= 0; i < positions.size(); i++)
+                positions[i]= positions[i] + Vector(0, -2, -4);     // a ajuster en fonction de l'objet...
         
-    }*/
-
-    // PART 2 Exercice 5
-    /*    //Triangle ABC
-    Point a(-1, -1, -2);
-    Point b(1, -1, -2);
-    Point c(1, 1, -2);
-
-    
-    // Triangle DEF
-    Point d(5, 5, -5);
-    Point e(5, 0, -5);
-    Point f(5, 2, -5);
-
-    // Triangle GHI
-    Point g(-10, -10, -10);
-    Point h(10, -10, -10);
-    Point i(10, 10, -10);
-    */
-
-    // Test du zbuffer avec 3 triangles manuellement
-    /*Image zbuff(image.width(), image.height(), Color(-1000));  
-
-    for(int py= 0; py < image.height(); py++)
-    for(int px= 0; px < image.width(); px++)
-    {
-        // rayon centre camera
-        float x = float(px)/image.width() * 2 - 1;
-        float y = float(py)/image.height() * 2 - 1;
-        float z = -1;       
-        Point p = Point(x, y, z);
-
-        Point o = Point(0, 0, 0);
-        Vector dist = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
-
-
-        // triangle
-        if(appartient_tetraedre(dist, o, a, b, c) || appartient_tetraedre(dist, o, d, e, f) || appartient_tetraedre(dist, o, g, h, i)) {
-            if(appartient_tetraedre(dist, o, a, b, c)) { 
-                Vector lambda = interpole(p, o, a, b, c);  
-                Point pe = point_dans_lespace(lambda, a, b, c);
-                float z = pe.z;
-                color_zbuff(px, py, z, zbuff, image, Red());
+            // englobant des points, verifier qu'ils sont bien devant la camera...
+            Point pmin= positions[0];
+            Point pmax= positions[0];
+            for(unsigned i= 1; i < positions.size(); i++)
+            {
+                pmin= min(pmin, positions[i]);
+                pmax= max(pmax, positions[i]);
             }
-            if(appartient_tetraedre(dist, o, d, e, f)) { 
-                Vector lambda = interpole(p, o, d, e, f);  
-                Point pe = point_dans_lespace(lambda, d, e, f);
-                float z = pe.z;
-                color_zbuff(px, py, z, zbuff, image, Green());
+            printf("bounds [%f %f %f]x[%f %f %f]\n", pmin.x, pmin.y, pmin.z, pmax.x, pmax.y, pmax.z);
+
+
+        /// ROBOT : LANCER DE RAYONS
+            if((argc == 3) && !strcmp(argv[2], "rayons")){
+               
+                // POUR PARCOURIR TOUS LES PIXELS DE L'IMAGE
+                for(int py= 0; py < image.height(); py++)
+                for(int px= 0; px < image.width(); px++)
+                {
+                    // Le pixel est noir par defaut
+                    //image(px, py)= Black();
+                    image(px, py)= Color(0.5, 0.5, 0.5);
+
+                    // rayon centre camera
+                    float x = float(px)/image.width() * 2 - 1;
+                    float y = float(py)/image.height() * 2 - 1;
+                    float z = -1;       
+                    Point p = Point(x, y, z);
+
+                    Point o = Point(0, 0, 0);
+                    Vector dir = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
+
+                    // DEFINITION D'UN RAYON LUMINEUX : SOLEIL. Si le triangle est éclairé par la lumière, s couleur est normale, sinon noire.
+                    Point origineSoleil(0.0, 0.0, 10.0);                     
+                    
+
+                    // cherche une collision avec le rayon origine-camera et un triangle
+                    Hit intersection = intersect(o, dir, positions);
+                    if(intersection.triangle_id != -1) {
+
+                        int material_id= material_indices[ intersection.triangle_id ];
+                        Material& material= materials( material_id );
+
+                        // Calcul intersection entre le points sur le triangle et la lumière
+                        Vector dirSoleil(origineSoleil, intersection.p);
+                        Color col;
+                        if(obstrue_lumiere(origineSoleil, dirSoleil, positions)) {
+                            col = Black();
+                        }
+                        else {
+                            col = material.diffuse * dot(normalize(intersection.n), normalize(Vector(intersection.p, o)));
+                        }
+                        
+                        col = Color(col, 1);
+                        image(px, py) = col;
+                    }
+                        
+                }
+                write_image(image, "projets/tp2/img/robot_rayons.png"); // par defaut en .png
             }
-            if(appartient_tetraedre(dist, o, g, h, i)) { 
-                Vector lambda = interpole(p, o, g, h, i);  
-                Point pe = point_dans_lespace(lambda, g, h, i);
-                float z = pe.z;
-                color_zbuff(px, py, z, zbuff, image, Blue());
-            }
-        }
-        //Vector n= normalize( cross( Vector(a, b), Vector(a, c) ) );
-        else{
-            image(px, py)= Color(0.5, 0.5, 0.5);
-        }
-        
-    }*/
-
-
-    // PARTIE 3 : TEST DE FONCTIONS D'INTERSECTION RAYON AVEC PLAN ET TRIANGLE
-    /*
-    Point origine(0.0, 0.0, 0.0);
-    origine = Point(0.0, 3.0, 0.0);
-    Vector direction(0.0, 0.0, -0.5);
-    Point a2(1.0, 0.0, -4.0);
-    Point b2(0.0, 1.0, -4.0);
-    Point c2(-1.0, -1.0, -4.0);
-    Point pi(-2.0, -2.0, -2.0);
-    float picoef;
-
-    if (intersection_plan(origine, direction, a2, b2, c2, pi, picoef))
-    {
-        std::cout << "Point d'intersection avec le plan: " << pi << std::endl;
-    }
-    else
-    {
-        std::cout << "Pas d'intersection avec le plan" << std::endl;
-    }
-    
-    if(intersection_tetraedre(origine, direction, a2, b2, c2, pi, picoef))  {
-        std::cout << "Point d'intersection avec le triangle: " << pi << std::endl;
-    }
-    else
-    {
-        std::cout << "Pas d'intersection avec le triangle" << std::endl;
-    }*/
-
-
-    // PARTIE 4 :
-
-    //const char *filename= "data/robot.obj";
-    const char *filename= "data/geometry.obj";
-
-    std::vector<Point> positions;
-    if(!read_positions(filename, positions))
-        //return "erreur";       
-        return 1;
-    printf("%d triangles\n", int(positions.size() / 3));
-
-
-    // Récupérer les materials et leurs indices
-    Materials materials;
-    std::vector<int> material_indices;   // indices des matieres
-    if(!read_materials(filename, materials, material_indices))
-        //return "erreur";       
-        return 1;
-
-    std::cout << "taille positions : " << positions.size() << std::endl;
-    std::cout << "taille material_indices : " << material_indices.size() << std::endl;
-    for(int y = 0; y < materials.count() ; y++)
-        std::cout << "material de " << y << " :  " << materials(y).diffuse.r << " " << materials(y).diffuse.g << " " << materials(y).diffuse.b << " " << std::endl;
-
-    
-    // recuperer les sommets du triangle numero id
-    /*Point a= positions[ 3*id ];
-    Point b= positions[ 3*id +1 ];
-    Point c= positions[ 3*id +2 ];
-    
-    // recuperer la matiere du triangle 
-    int material_id= material_indices[ id ];
-    Material& material= materials( material_id );
-    
-    // recuperer la couleur (de la matiere) du triangle
-    Color color= material.diffuse;*/
-
-    ///////////////////////////////////////
-   
-    // deplace tous les sommets devant la camera
-    for(unsigned i= 0; i < positions.size(); i++)
-        //positions[i]= positions[i] + Vector(0, -2, -4);     // robot...
-        positions[i]= positions[i] + Vector(0, -110, -550);     // geometry...
-   
-    // englobant des points, verifier qu'ils sont bien devant la camera...
-    Point pmin= positions[0];
-    Point pmax= positions[0];
-    for(unsigned i= 1; i < positions.size(); i++)
-    {
-        pmin= min(pmin, positions[i]);
-        pmax= max(pmax, positions[i]);
-    }
-    printf("bounds [%f %f %f]x[%f %f %f]\n", pmin.x, pmin.y, pmin.z, pmax.x, pmax.y, pmax.z);    
-    
-
-    // POUR PARCOURIR TOUS LES PIXELS DE L'IMAGE
-    /*for(int py= 0; py < image.height(); py++)
-    for(int px= 0; px < image.width(); px++)*/
-    // POUR NE PARCOURIR TOUS LES PIXELS MAIS SEULEMENT CEUX CONCERNÉS PAR LA BOITE ENGLOBANTE
-    for(int py= 0; py < image.height(); py++)
-    for(int px= 0; px < image.width(); px++)
-    {
-
-        // Le pixel est noir par defaut
-        //image(px, py)= Black();//Color(0.5, 0.5, 0.5);
-        image(px, py)= Color(0.5, 0.5, 0.5);
-
-        // rayon centre camera
-        float x = float(px)/image.width() * 2 - 1;
-        float y = float(py)/image.height() * 2 - 1;
-        float z = -1;       
-        Point p = Point(x, y, z);
-
-        Point o = Point(0, 0, 0);
-        Vector dir = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
-
-        // DEFINITION D'UN RAYON LUMINEUX : SOLEIL. Si le triangle est éclairé par la lumière, s couleur est normale, sinon noire.
-        //Point origineSoleil(-100.0, 10.0, -200.0);
-        //Point origineSoleil(100.0, 10.0, -150.0);
-        Point origineSoleil(0.0, 10.0, -600.0);
-
-        // cherche une collision avec le rayon origine-camera et un triangle
-        Hit intersection = intersect(o, dir, positions);
-        if(intersection.triangle_id != -1) {
-            // Pour le robot :
-            /*Vector normal = normalize(intersection.n);
-            Color col = Color(abs(normal.x), abs(normal.y), abs(normal.z), 1.0);*/
-
-            // Pour geometry.obj
-            //std::cout << intersection.lambdax << ", " << intersection.lambday << ", " << intersection.lambdaz << std::endl;
-            int material_id= material_indices[ intersection.triangle_id ];
-            Material& material= materials( material_id );
-
-            // Calcul intersection entre le points sur le triangle et la lumière
-            Vector dirSoleil(origineSoleil, intersection.p);
-            Color col;
-            if(obstrue_lumiere(origineSoleil, dirSoleil, positions)) {
-                col = Black();
-            }
+        /// ROBOT : ZBUFFER
             else {
-                col = material.diffuse * dot(normalize(intersection.n), normalize(Vector(intersection.p, o)));
+                Image zbuff(image.width(), image.height(), Color(-1000));  
+
+                // POUR PARCOURIR TOUS LES PIXELS DE L'IMAGE
+                for(int py= 0; py < image.height(); py++)
+                for(int px= 0; px < image.width(); px++)
+                {
+                    // Le pixel est noir par defaut
+                    image(px, py)= Black();//Color(0.5, 0.5, 0.5);
+
+                    // rayon centre camera
+                    float x = float(px)/image.width() * 2 - 1;
+                    float y = float(py)/image.height() * 2 - 1;
+                    float z = -1;       
+                    Point p = Point(x, y, z);
+
+                    Point o = Point(0, 0, 0);
+                    Vector dist = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
+
+                    // parcours tous les triangles
+                    for(unsigned i= 0; i +2 < positions.size(); i+= 3)
+                    {
+                        Point t[3]= {
+                            positions[ i    ],
+                            positions[ i +1 ],
+                            positions[ i +2 ]
+                        };
+
+                        //std::cout << t[0].x << t[0].y << t[0].z << std::endl;
+
+                        Vector normal = normalize( cross( Vector(t[0], t[1]), Vector(t[0], t[2]) ) );
+                        if(normal.z >= 0){
+                            
+                            // triangle
+                            if(appartient_tetraedre(dist, o, t[0], t[1], t[2])) {
+                                Vector lambda = interpole(p, o, t[0], t[1], t[2]);  
+                                Point pe = point_dans_lespace(lambda, t[0], t[1], t[2]);
+                                float z = pe.z;
+                                Color col = Color(abs(normal.x), abs(normal.y), abs(normal.z), 1.0);
+                                color_zbuff(px, py, z, zbuff, image, col);
+                            }
+
+                        }
+                    }        
+                }
+                write_image(image, "projets/tp2/img/robot_zbuffer.png"); // par defaut en .png
             }
             
-            col = Color(col, 1);
-            image(px, py) = col;
         }
+
+    // GEOMETRY : SCENE AVEC LUMIERE DIFFUSE ET OMBRES
+        else if(!strcmp(argv[1], "geometry")) {
+
+            const char *filename= "data/geometry.obj";
+
+            std::vector<Point> positions;
+            if(!read_positions(filename, positions))
+                //return "erreur";       
+                return 1;
+            printf("%d triangles\n", int(positions.size() / 3));
+
+
+            // Récupérer les materials et leurs indices
+            Materials materials;
+            std::vector<int> material_indices;   // indices des matieres
+            if(!read_materials(filename, materials, material_indices))
+                //return "erreur";       
+                return 1;
+
+            std::cout << "taille positions : " << positions.size() << std::endl;
+            std::cout << "taille material_indices : " << material_indices.size() << std::endl;
+            for(int y = 0; y < materials.count() ; y++)
+                std::cout << "material de " << y << " :  " << materials(y).diffuse.r << " " << materials(y).diffuse.g << " " << materials(y).diffuse.b << " " << std::endl;
+
+        
+            // deplace tous les sommets devant la camera
+            for(unsigned i= 0; i < positions.size(); i++)
+                //positions[i]= positions[i] + Vector(0, -2, -4);     // robot...
+                positions[i]= positions[i] + Vector(0, -110, -550);     // geometry...
+        
+            // englobant des points, verifier qu'ils sont bien devant la camera...
+            Point pmin= positions[0];
+            Point pmax= positions[0];
+            for(unsigned i= 1; i < positions.size(); i++)
+            {
+                pmin= min(pmin, positions[i]);
+                pmax= max(pmax, positions[i]);
+            }
+            printf("bounds [%f %f %f]x[%f %f %f]\n", pmin.x, pmin.y, pmin.z, pmax.x, pmax.y, pmax.z);    
             
+
+            // POUR PARCOURIR TOUS LES PIXELS DE L'IMAGE
+            for(int py= 0; py < image.height(); py++)
+            for(int px= 0; px < image.width(); px++)
+            {
+
+                // Le pixel est noir par defaut
+                //image(px, py)= Black();
+                image(px, py)= Color(0.5, 0.5, 0.5);
+
+                // rayon centre camera
+                float x = float(px)/image.width() * 2 - 1;
+                float y = float(py)/image.height() * 2 - 1;
+                float z = -1;       
+                Point p = Point(x, y, z);
+
+                Point o = Point(0, 0, 0);
+                Vector dir = Vector(o, p);    // ou Vector d= p - o; // si vous preferrez...
+
+                // DEFINITION D'UN RAYON LUMINEUX : SOLEIL. Si le triangle est éclairé par la lumière, s couleur est normale, sinon noire.
+                Point origineSoleil(-100.0, 10.0, -200.0);
+                if(argc == 3 && !strcmp(argv[2], "source2"))
+                    origineSoleil = Point(100.0, 10.0, -150.0);
+                else if(argc == 3 && !strcmp(argv[2], "source3"))
+                    origineSoleil = Point(0.0, 10.0, -600.0);
+                
+
+                // cherche une collision avec le rayon origine-camera et un triangle
+                Hit intersection = intersect(o, dir, positions);
+                if(intersection.triangle_id != -1) {
+
+                    int material_id= material_indices[ intersection.triangle_id ];
+                    Material& material= materials( material_id );
+
+                    // Calcul intersection entre le points sur le triangle et la lumière
+                    Vector dirSoleil(origineSoleil, intersection.p);
+                    Color col;
+                    if(obstrue_lumiere(origineSoleil, dirSoleil, positions)) {
+                        col = Black();
+                    }
+                    else {
+                        col = material.diffuse * dot(normalize(intersection.n), normalize(Vector(intersection.p, o)));
+                    }
+                    
+                    col = Color(col, 1);
+                    image(px, py) = col;
+                }
+                    
+            }
+            write_image(image, "projets/tp2/img/geometry.png"); // par defaut en .png
+        }   
+
     }
 
-    write_image(image, "image.png"); // par defaut en .png
+    // On utilise pas d'arguments pour lancer l'executable
+    else {
+        std::cout << "* Premier paramètre : ./bin/tp2" << std::endl;
+        std::cout << "* Troisième paramètre : 'triangles' ou 'robot' ou 'geometry'" << std::endl;
+        std::cout << "     - triangles :" << std::endl;
+        
+        std::cout << "     - robot :" << std::endl;
+        std::cout << "          * Quatrième paramètre : 'zbuffer' ou 'rayons'" << std::endl;
+        std::cout << "               - zbuffer :" << std::endl;
+        std::cout << "               - rayons" << std::endl;
+        std::cout << "     - geometry :" << std::endl;
+        std::cout << "          * Quatrième paramètre : 'source1' ou 'source2' ou 'source3' " << std::endl;
+        std::cout << "               - source1 :" << std::endl;
+        std::cout << "               - source2 :" << std::endl;
+        std::cout << "               - source3 :" << std::endl;
 
+
+    }
 
     return 0;
 }
